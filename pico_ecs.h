@@ -878,6 +878,35 @@ void* ecs_get(ecs_t* ecs, ecs_id_t entity_id, ecs_id_t comp_id)
     return (char*)comp_array->data + (comp_array->size * entity_id);
 }
 
+void ecs_filter_entity(ecs_t* ecs, ecs_id_t entity_id) {
+    // Load entity
+    ecs_entity_t* entity = &ecs->entities[entity_id];
+
+    // Add entity to systems
+    for (ecs_id_t sys_id = 0; sys_id < ecs->system_count; sys_id++)
+    {
+        ecs_sys_t* sys = &ecs->systems[sys_id];
+
+		bool test = ecs_entity_system_test(&sys->require_bits, &sys->exclude_bits, &entity->comp_bits);
+		if (test && ecs_sparse_set_find(&sys->entity_ids, entity_id) == ECS_NULL) {
+            if (ecs_sparse_set_add(ecs, &sys->entity_ids, entity_id))
+            {
+                if (sys->add_cb)
+                    sys->add_cb(ecs, entity_id, sys->udata);
+            }
+		}
+
+        if (!test && ecs_sparse_set_find(&sys->entity_ids, entity_id) != ECS_NULL)
+        {
+            if (ecs_sparse_set_remove(&sys->entity_ids, entity_id))
+            {
+                if (sys->remove_cb)
+                    sys->remove_cb(ecs, entity_id, sys->udata);
+            }
+        }
+    }
+}
+
 void* ecs_add(ecs_t* ecs, ecs_id_t entity_id, ecs_id_t comp_id, void* args)
 {
     ECS_ASSERT(ecs_is_not_null(ecs));
@@ -908,20 +937,7 @@ void* ecs_add(ecs_t* ecs, ecs_id_t entity_id, ecs_id_t comp_id, void* args)
     // belongs to
     ecs_bitset_flip(&entity->comp_bits, comp_id, true);
 
-    // Add entity to systems
-    for (ecs_id_t sys_id = 0; sys_id < ecs->system_count; sys_id++)
-    {
-        ecs_sys_t* sys = &ecs->systems[sys_id];
-
-        if (ecs_entity_system_test(&sys->require_bits, &sys->exclude_bits, &entity->comp_bits))
-        {
-            if (ecs_sparse_set_add(ecs, &sys->entity_ids, entity_id))
-            {
-                if (sys->add_cb)
-                    sys->add_cb(ecs, entity_id, sys->udata);
-            }
-        }
-    }
+    ecs_filter_entity(ecs, entity_id);
 
     // Return component
     return ptr;
@@ -937,20 +953,7 @@ void ecs_remove(ecs_t* ecs, ecs_id_t entity_id, ecs_id_t comp_id)
     // Load entity
     ecs_entity_t* entity = &ecs->entities[entity_id];
 
-    // Remove entity from systems
-    for (ecs_id_t sys_id = 0; sys_id < ecs->system_count; sys_id++)
-    {
-        ecs_sys_t* sys = &ecs->systems[sys_id];
-
-        if (ecs_entity_system_test(&sys->require_bits, &sys->exclude_bits, &entity->comp_bits))
-        {
-            if (ecs_sparse_set_remove(&sys->entity_ids, entity_id))
-            {
-                if (sys->remove_cb)
-                    sys->remove_cb(ecs, entity_id, sys->udata);
-            }
-        }
-    }
+    ecs_filter_entity(ecs, entity_id);
 
     ecs_comp_t* comp = &ecs->comps[comp_id];
 
